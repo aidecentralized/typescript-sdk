@@ -28,6 +28,9 @@ describe('MCP Auth Router', () => {
 
   const mockProvider: OAuthServerProvider = {
     clientsStore: mockClientStore,
+    // Add client tracking properties
+    trackingStore: undefined,
+    clientTrackingEnabled: false,
 
     async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
       const redirectUrl = new URL(params.redirectUri);
@@ -79,6 +82,9 @@ describe('MCP Auth Router', () => {
 
   // Provider without registration and revocation
   const mockProviderMinimal: OAuthServerProvider = {
+    // Add client tracking properties
+    trackingStore: undefined,
+    clientTrackingEnabled: false,
     clientsStore: {
       async getClient(clientId: string): Promise<OAuthClientInformationFull | undefined> {
         if (clientId === 'valid-client') {

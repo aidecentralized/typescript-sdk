@@ -42,6 +42,25 @@ import { Completable, CompletableDef } from "./completable.js";
 import { UriTemplate, Variables } from "../shared/uriTemplate.js";
 import { RequestHandlerExtra } from "../shared/protocol.js";
 import { Transport } from "../shared/transport.js";
+import { ClientTrackingStore, ActivityQueryOptions } from "./auth/types.js";
+import { InMemoryClientTrackingStore } from "./auth/clients.js";
+
+/**
+ * Options for configuring the McpServer instance
+ */
+export interface McpServerOptions extends ServerOptions {
+  /**
+   * Whether to enable client tracking
+   * @default false
+   */
+  enableClientTracking?: boolean;
+  
+  /**
+   * Custom client tracking store to use
+   * If not provided but enableClientTracking is true, an InMemoryClientTrackingStore will be used
+   */
+  clientTrackingStore?: ClientTrackingStore;
+}
 
 /**
  * High-level MCP server that provides a simpler API for working with resources, tools, and prompts.
@@ -53,6 +72,16 @@ export class McpServer {
    * The underlying Server instance, useful for advanced operations like sending notifications.
    */
   public readonly server: Server;
+  
+  /**
+   * The client tracking store, if client tracking is enabled
+   */
+  private _clientTrackingStore?: ClientTrackingStore;
+  
+  /**
+   * Whether client tracking is enabled
+   */
+  private _clientTrackingEnabled: boolean;
 
   private _registeredResources: { [uri: string]: RegisteredResource } = {};
   private _registeredResourceTemplates: {
@@ -61,8 +90,36 @@ export class McpServer {
   private _registeredTools: { [name: string]: RegisteredTool } = {};
   private _registeredPrompts: { [name: string]: RegisteredPrompt } = {};
 
-  constructor(serverInfo: Implementation, options?: ServerOptions) {
+  constructor(serverInfo: Implementation, options?: McpServerOptions) {
     this.server = new Server(serverInfo, options);
+    this._clientTrackingEnabled = options?.enableClientTracking ?? false;
+    
+    if (this._clientTrackingEnabled) {
+      this._clientTrackingStore = options?.clientTrackingStore ?? new InMemoryClientTrackingStore();
+    }
+    
+    // Register server capabilities for client tracking if enabled
+    if (this._clientTrackingEnabled) {
+      this.server.registerCapabilities({
+        experimental: {
+          clientTracking: true
+        }
+      });
+    }
+  }
+
+  /**
+   * Whether client tracking is enabled for this server
+   */
+  get clientTrackingEnabled(): boolean {
+    return this._clientTrackingEnabled;
+  }
+  
+  /**
+   * The client tracking store, if client tracking is enabled
+   */
+  get clientTrackingStore(): ClientTrackingStore | undefined {
+    return this._clientTrackingStore;
   }
 
   /**
@@ -79,6 +136,40 @@ export class McpServer {
    */
   async close(): Promise<void> {
     await this.server.close();
+  }
+  
+  /**
+   * Records client activity for tracking
+   */
+  async recordClientActivity(
+    extra: RequestHandlerExtra,
+    activity: {
+      type: string;
+      method: string;
+      metadata?: Record<string, unknown>;
+      status?: 'success' | 'error';
+      error?: { code: number; message: string };
+    }
+  ): Promise<void> {
+    if (!this._clientTrackingEnabled || !this._clientTrackingStore || !extra.auth) {
+      return;
+    }
+    
+    const trackingId = extra.auth.trackingId;
+    if (!trackingId) {
+      return; // Skip if no tracking ID is available
+    }
+    
+    const timestamp = Date.now();
+    
+    await this._clientTrackingStore.recordActivity(
+      extra.auth.clientId,
+      trackingId,
+      {
+        timestamp,
+        ...activity
+      }
+    );
   }
 
   private _toolHandlersInitialized = false;
@@ -101,76 +192,139 @@ export class McpServer {
 
     this.server.setRequestHandler(
       ListToolsRequestSchema,
-      (): ListToolsResult => ({
-        tools: Object.entries(this._registeredTools).map(
-          ([name, tool]): Tool => {
-            return {
-              name,
-              description: tool.description,
-              inputSchema: tool.inputSchema
-                ? (zodToJsonSchema(tool.inputSchema, {
-                    strictUnions: true,
-                  }) as Tool["inputSchema"])
-                : EMPTY_OBJECT_JSON_SCHEMA,
-            };
-          },
-        ),
-      }),
+      async (request, extra): Promise<ListToolsResult> => {
+        // Record client activity for tool list request
+        if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+          await this.recordClientActivity(extra, {
+            type: 'tool/list',
+            method: request.method,
+            status: 'success'
+          });
+        }
+        
+        return {
+          tools: Object.entries(this._registeredTools).map(
+            ([name, tool]): Tool => {
+              return {
+                name,
+                description: tool.description,
+                inputSchema: tool.inputSchema
+                  ? (zodToJsonSchema(tool.inputSchema, {
+                      strictUnions: true,
+                    }) as Tool["inputSchema"])
+                  : EMPTY_OBJECT_JSON_SCHEMA,
+              };
+            },
+          ),
+        };
+      }
     );
 
     this.server.setRequestHandler(
       CallToolRequestSchema,
       async (request, extra): Promise<CallToolResult> => {
-        const tool = this._registeredTools[request.params.name];
-        if (!tool) {
-          throw new McpError(
-            ErrorCode.InvalidParams,
-            `Tool ${request.params.name} not found`,
-          );
-        }
-
-        if (tool.inputSchema) {
-          const parseResult = await tool.inputSchema.safeParseAsync(
-            request.params.arguments,
-          );
-          if (!parseResult.success) {
+        const startTime = Date.now();
+        let result: CallToolResult;
+        let status: 'success' | 'error' = 'success';
+        let error: { code: number; message: string } | undefined;
+        
+        try {
+          const tool = this._registeredTools[request.params.name];
+          if (!tool) {
+            error = {
+              code: ErrorCode.InvalidParams,
+              message: `Tool ${request.params.name} not found`
+            };
             throw new McpError(
               ErrorCode.InvalidParams,
-              `Invalid arguments for tool ${request.params.name}: ${parseResult.error.message}`,
+              `Tool ${request.params.name} not found`,
             );
           }
 
-          const args = parseResult.data;
-          const cb = tool.callback as ToolCallback<ZodRawShape>;
-          try {
-            return await Promise.resolve(cb(args, extra));
-          } catch (error) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: error instanceof Error ? error.message : String(error),
-                },
-              ],
-              isError: true,
+          if (tool.inputSchema) {
+            const parseResult = await tool.inputSchema.safeParseAsync(
+              request.params.arguments,
+            );
+            if (!parseResult.success) {
+              error = {
+                code: ErrorCode.InvalidParams,
+                message: `Invalid arguments for tool ${request.params.name}: ${parseResult.error.message}`
+              };
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                `Invalid arguments for tool ${request.params.name}: ${parseResult.error.message}`,
+              );
+            }
+
+            const args = parseResult.data;
+            const cb = tool.callback as ToolCallback<ZodRawShape>;
+            try {
+              result = await Promise.resolve(cb(args, extra));
+            } catch (err) {
+              status = 'error';
+              error = {
+                code: ErrorCode.InternalError,
+                message: err instanceof Error ? err.message : String(err)
+              };
+              result = {
+                content: [
+                  {
+                    type: "text",
+                    text: err instanceof Error ? err.message : String(err),
+                  },
+                ],
+                isError: true,
+              };
+            }
+          } else {
+            const cb = tool.callback as ToolCallback<undefined>;
+            try {
+              result = await Promise.resolve(cb(extra));
+            } catch (err) {
+              status = 'error';
+              error = {
+                code: ErrorCode.InternalError,
+                message: err instanceof Error ? err.message : String(err)
+              };
+              result = {
+                content: [
+                  {
+                    type: "text",
+                    text: err instanceof Error ? err.message : String(err),
+                  },
+                ],
+                isError: true,
+              };
+            }
+          }
+        } catch (err) {
+          status = 'error';
+          if (!error) {
+            error = {
+              code: err instanceof McpError ? err.code : ErrorCode.InternalError,
+              message: err instanceof Error ? err.message : String(err)
             };
           }
-        } else {
-          const cb = tool.callback as ToolCallback<undefined>;
-          try {
-            return await Promise.resolve(cb(extra));
-          } catch (error) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: error instanceof Error ? error.message : String(error),
-                },
-              ],
-              isError: true,
-            };
+          throw err;
+        } finally {
+          // Record client activity for tool call
+          if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+            const duration = Date.now() - startTime;
+            await this.recordClientActivity(extra, {
+              type: 'tool/call',
+              method: request.method,
+              metadata: {
+                tool: request.params.name,
+                arguments: request.params.arguments,
+                duration
+              },
+              status,
+              error
+            });
           }
         }
+        
+        return result;
       },
     );
 
@@ -190,19 +344,60 @@ export class McpServer {
 
     this.server.setRequestHandler(
       CompleteRequestSchema,
-      async (request): Promise<CompleteResult> => {
-        switch (request.params.ref.type) {
-          case "ref/prompt":
-            return this.handlePromptCompletion(request, request.params.ref);
+      async (request, extra): Promise<CompleteResult> => {
+        const startTime = Date.now();
+        let status: 'success' | 'error' = 'success';
+        let error: { code: number; message: string } | undefined;
+        
+        try {
+          let result: CompleteResult;
+          
+          switch (request.params.ref.type) {
+            case "ref/prompt":
+              result = await this.handlePromptCompletion(request, request.params.ref);
+              break;
 
-          case "ref/resource":
-            return this.handleResourceCompletion(request, request.params.ref);
+            case "ref/resource":
+              result = await this.handleResourceCompletion(request, request.params.ref);
+              break;
 
-          default:
-            throw new McpError(
-              ErrorCode.InvalidParams,
-              `Invalid completion reference: ${request.params.ref}`,
-            );
+            default:
+              error = {
+                code: ErrorCode.InvalidParams,
+                message: `Invalid completion reference: ${request.params.ref}`
+              };
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                `Invalid completion reference: ${request.params.ref}`,
+              );
+          }
+          
+          return result;
+        } catch (err) {
+          status = 'error';
+          if (!error) {
+            error = {
+              code: err instanceof McpError ? err.code : ErrorCode.InternalError,
+              message: err instanceof Error ? err.message : String(err)
+            };
+          }
+          throw err;
+        } finally {
+          // Record client activity for completion
+          if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+            const duration = Date.now() - startTime;
+            await this.recordClientActivity(extra, {
+              type: 'completion/complete',
+              method: request.method,
+              metadata: {
+                refType: request.params.ref.type,
+                argument: request.params.argument,
+                duration
+              },
+              status,
+              error
+            });
+          }
         }
       },
     );
@@ -291,77 +486,169 @@ export class McpServer {
     this.server.setRequestHandler(
       ListResourcesRequestSchema,
       async (request, extra) => {
-        const resources = Object.entries(this._registeredResources).map(
-          ([uri, resource]) => ({
-            uri,
-            name: resource.name,
-            ...resource.metadata,
-          }),
-        );
+        const startTime = Date.now();
+        let status: 'success' | 'error' = 'success';
+        let error: { code: number; message: string } | undefined;
+        
+        try {
+          const resources = Object.entries(this._registeredResources).map(
+            ([uri, resource]) => ({
+              uri,
+              name: resource.name,
+              ...resource.metadata,
+            }),
+          );
 
-        const templateResources: Resource[] = [];
-        for (const template of Object.values(
-          this._registeredResourceTemplates,
-        )) {
-          if (!template.resourceTemplate.listCallback) {
-            continue;
+          const templateResources: Resource[] = [];
+          for (const template of Object.values(
+            this._registeredResourceTemplates,
+          )) {
+            if (!template.resourceTemplate.listCallback) {
+              continue;
+            }
+
+            const result = await template.resourceTemplate.listCallback(extra);
+            for (const resource of result.resources) {
+              templateResources.push({
+                ...resource,
+                ...template.metadata,
+              });
+            }
           }
 
-          const result = await template.resourceTemplate.listCallback(extra);
-          for (const resource of result.resources) {
-            templateResources.push({
-              ...resource,
-              ...template.metadata,
+          return { resources: [...resources, ...templateResources] };
+        } catch (err) {
+          status = 'error';
+          error = {
+            code: err instanceof McpError ? err.code : ErrorCode.InternalError,
+            message: err instanceof Error ? err.message : String(err)
+          };
+          throw err;
+        } finally {
+          // Record client activity for resource listing
+          if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+            const duration = Date.now() - startTime;
+            await this.recordClientActivity(extra, {
+              type: 'resource/list',
+              method: request.method,
+              metadata: {
+                duration
+              },
+              status,
+              error
             });
           }
         }
-
-        return { resources: [...resources, ...templateResources] };
       },
     );
 
     this.server.setRequestHandler(
       ListResourceTemplatesRequestSchema,
-      async () => {
-        const resourceTemplates = Object.entries(
-          this._registeredResourceTemplates,
-        ).map(([name, template]) => ({
-          name,
-          uriTemplate: template.resourceTemplate.uriTemplate.toString(),
-          ...template.metadata,
-        }));
+      async (request, extra) => {
+        const startTime = Date.now();
+        let status: 'success' | 'error' = 'success';
+        let error: { code: number; message: string } | undefined;
+        
+        try {
+          const resourceTemplates = Object.entries(
+            this._registeredResourceTemplates,
+          ).map(([name, template]) => ({
+            name,
+            uriTemplate: template.resourceTemplate.uriTemplate.toString(),
+            ...template.metadata,
+          }));
 
-        return { resourceTemplates };
+          return { resourceTemplates };
+        } catch (err) {
+          status = 'error';
+          error = {
+            code: err instanceof McpError ? err.code : ErrorCode.InternalError,
+            message: err instanceof Error ? err.message : String(err)
+          };
+          throw err;
+        } finally {
+          // Record client activity for resource templates listing
+          if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+            const duration = Date.now() - startTime;
+            await this.recordClientActivity(extra, {
+              type: 'resource/templates/list',
+              method: request.method,
+              metadata: {
+                duration
+              },
+              status,
+              error
+            });
+          }
+        }
       },
     );
 
     this.server.setRequestHandler(
       ReadResourceRequestSchema,
       async (request, extra) => {
-        const uri = new URL(request.params.uri);
+        const startTime = Date.now();
+        let status: 'success' | 'error' = 'success';
+        let error: { code: number; message: string } | undefined;
+        let resourceType: string = 'unknown';
+        
+        try {
+          const uri = new URL(request.params.uri);
 
-        // First check for exact resource match
-        const resource = this._registeredResources[uri.toString()];
-        if (resource) {
-          return resource.readCallback(uri, extra);
-        }
+          // First check for exact resource match
+          const resource = this._registeredResources[uri.toString()];
+          if (resource) {
+            resourceType = 'static';
+            return resource.readCallback(uri, extra);
+          }
 
-        // Then check templates
-        for (const template of Object.values(
-          this._registeredResourceTemplates,
-        )) {
-          const variables = template.resourceTemplate.uriTemplate.match(
-            uri.toString(),
+          // Then check templates
+          for (const template of Object.values(
+            this._registeredResourceTemplates,
+          )) {
+            const variables = template.resourceTemplate.uriTemplate.match(
+              uri.toString(),
+            );
+            if (variables) {
+              resourceType = 'template';
+              return template.readCallback(uri, variables, extra);
+            }
+          }
+
+          error = {
+            code: ErrorCode.InvalidParams,
+            message: `Resource ${uri} not found`
+          };
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            `Resource ${uri} not found`,
           );
-          if (variables) {
-            return template.readCallback(uri, variables, extra);
+        } catch (err) {
+          status = 'error';
+          if (!error) {
+            error = {
+              code: err instanceof McpError ? err.code : ErrorCode.InternalError,
+              message: err instanceof Error ? err.message : String(err)
+            };
+          }
+          throw err;
+        } finally {
+          // Record client activity for resource reading
+          if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+            const duration = Date.now() - startTime;
+            await this.recordClientActivity(extra, {
+              type: 'resource/read',
+              method: request.method,
+              metadata: {
+                uri: request.params.uri,
+                resourceType,
+                duration
+              },
+              status,
+              error
+            });
           }
         }
-
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          `Resource ${uri} not found`,
-        );
       },
     );
 
@@ -390,49 +677,117 @@ export class McpServer {
 
     this.server.setRequestHandler(
       ListPromptsRequestSchema,
-      (): ListPromptsResult => ({
-        prompts: Object.entries(this._registeredPrompts).map(
-          ([name, prompt]): Prompt => {
-            return {
-              name,
-              description: prompt.description,
-              arguments: prompt.argsSchema
-                ? promptArgumentsFromSchema(prompt.argsSchema)
-                : undefined,
-            };
-          },
-        ),
-      }),
+      async (request, extra): Promise<ListPromptsResult> => {
+        const startTime = Date.now();
+        let status: 'success' | 'error' = 'success';
+        let error: { code: number; message: string } | undefined;
+        
+        try {
+          return {
+            prompts: Object.entries(this._registeredPrompts).map(
+              ([name, prompt]): Prompt => {
+                return {
+                  name,
+                  description: prompt.description,
+                  arguments: prompt.argsSchema
+                    ? promptArgumentsFromSchema(prompt.argsSchema)
+                    : undefined,
+                };
+              },
+            ),
+          };
+        } catch (err) {
+          status = 'error';
+          error = {
+            code: err instanceof McpError ? err.code : ErrorCode.InternalError,
+            message: err instanceof Error ? err.message : String(err)
+          };
+          throw err;
+        } finally {
+          // Record client activity for prompts listing
+          if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+            const duration = Date.now() - startTime;
+            await this.recordClientActivity(extra, {
+              type: 'prompt/list',
+              method: request.method,
+              metadata: {
+                duration
+              },
+              status,
+              error
+            });
+          }
+        }
+      },
     );
 
     this.server.setRequestHandler(
       GetPromptRequestSchema,
       async (request, extra): Promise<GetPromptResult> => {
-        const prompt = this._registeredPrompts[request.params.name];
-        if (!prompt) {
-          throw new McpError(
-            ErrorCode.InvalidParams,
-            `Prompt ${request.params.name} not found`,
-          );
-        }
-
-        if (prompt.argsSchema) {
-          const parseResult = await prompt.argsSchema.safeParseAsync(
-            request.params.arguments,
-          );
-          if (!parseResult.success) {
+        const startTime = Date.now();
+        let status: 'success' | 'error' = 'success';
+        let error: { code: number; message: string } | undefined;
+        
+        try {
+          const prompt = this._registeredPrompts[request.params.name];
+          if (!prompt) {
+            error = {
+              code: ErrorCode.InvalidParams,
+              message: `Prompt ${request.params.name} not found`
+            };
             throw new McpError(
               ErrorCode.InvalidParams,
-              `Invalid arguments for prompt ${request.params.name}: ${parseResult.error.message}`,
+              `Prompt ${request.params.name} not found`,
             );
           }
 
-          const args = parseResult.data;
-          const cb = prompt.callback as PromptCallback<PromptArgsRawShape>;
-          return await Promise.resolve(cb(args, extra));
-        } else {
-          const cb = prompt.callback as PromptCallback<undefined>;
-          return await Promise.resolve(cb(extra));
+          if (prompt.argsSchema) {
+            const parseResult = await prompt.argsSchema.safeParseAsync(
+              request.params.arguments,
+            );
+            if (!parseResult.success) {
+              error = {
+                code: ErrorCode.InvalidParams,
+                message: `Invalid arguments for prompt ${request.params.name}: ${parseResult.error.message}`
+              };
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                `Invalid arguments for prompt ${request.params.name}: ${parseResult.error.message}`,
+              );
+            }
+
+            const args = parseResult.data;
+            const cb = prompt.callback as PromptCallback<PromptArgsRawShape>;
+            return await Promise.resolve(cb(args, extra));
+          } else {
+            const cb = prompt.callback as PromptCallback<undefined>;
+            return await Promise.resolve(cb(extra));
+          }
+        } catch (err) {
+          status = 'error';
+          if (!error) {
+            error = {
+              code: err instanceof McpError ? err.code : ErrorCode.InternalError,
+              message: err instanceof Error ? err.message : String(err)
+            };
+          }
+          throw err;
+        } finally {
+          // Record client activity for prompt retrieval
+          if (this._clientTrackingEnabled && extra.auth?.trackingId) {
+            const duration = Date.now() - startTime;
+            await this.recordClientActivity(extra, {
+              type: 'prompt/get',
+              method: request.method,
+              metadata: {
+                promptName: request.params.name,
+                arguments: request.params.arguments,
+                duration
+              },
+              status,
+              error
+            });
+          }
         }
       },
     );
@@ -623,6 +978,68 @@ export class McpServer {
 
     this.setPromptRequestHandlers();
   }
+  
+  /**
+   * Creates a tool for providing access to client activity data.
+   * This should only be called if client tracking is enabled.
+   */
+  registerClientActivityTool() {
+    if (!this._clientTrackingEnabled || !this._clientTrackingStore) {
+      throw new Error("Client tracking must be enabled to register activity tool");
+    }
+    
+    this.tool(
+      "clientActivity",
+      "Get activity information for a client",
+      {
+        trackingId: z.string().optional().describe("Client tracking ID to get activity for. If not provided, uses the current client's trackingId."),
+        limit: z.number().int().min(1).max(100).default(20).describe("Maximum number of activities to return"),
+        type: z.string().optional().describe("Filter activities by type")
+      },
+      async (args, extra): Promise<CallToolResult> => {
+        const trackingId = args.trackingId || extra.auth?.trackingId;
+        
+        if (!trackingId) {
+          return {
+            content: [{
+              type: "text",
+              text: "No tracking ID provided or available for the current client."
+            }],
+            isError: true
+          };
+        }
+        
+        try {
+          const options: ActivityQueryOptions = {
+            limit: args.limit,
+            types: args.type ? [args.type] : undefined,
+            sort: 'desc'
+          };
+          
+          const activities = await this._clientTrackingStore!.getActivities(trackingId, options);
+          const stats = await this._clientTrackingStore!.getActivityStats(trackingId);
+          
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                activities,
+                stats
+              }, null, 2)
+            }]
+          };
+        } catch (error) {
+          return {
+            content: [{
+              type: "text",
+              text: `Error retrieving activity data: ${error instanceof Error ? error.message : String(error)}`
+            }],
+            isError: true
+          };
+        }
+      }
+    );
+  }
 }
 
 /**
@@ -797,4 +1214,4 @@ const EMPTY_COMPLETION_RESULT: CompleteResult = {
     values: [],
     hasMore: false,
   },
-};
+}

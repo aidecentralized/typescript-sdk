@@ -14,6 +14,9 @@ const mockProvider: OAuthServerProvider = {
   exchangeAuthorizationCode: jest.fn(),
   exchangeRefreshToken: jest.fn(),
   verifyAccessToken: mockVerifyAccessToken,
+  // Add required properties for client tracking
+  trackingStore: undefined,
+  clientTrackingEnabled: false,
 };
 
 describe("requireBearerAuth middleware", () => {
