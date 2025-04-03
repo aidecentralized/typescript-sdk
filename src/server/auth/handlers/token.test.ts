@@ -41,6 +41,9 @@ describe('Token Handler', () => {
     // Create fresh mocks for each test
     mockProvider = {
       clientsStore: mockClientStore,
+      // Add client tracking properties
+      trackingStore: undefined,
+      clientTrackingEnabled: false,
 
       async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
         res.redirect('https://example.com/callback?code=mock_auth_code');

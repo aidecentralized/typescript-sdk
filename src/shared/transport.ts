@@ -1,5 +1,12 @@
 import { JSONRPCMessage } from "../types.js";
 
+// Import type only, to avoid circular dependencies
+type AuthInfo = {
+  clientId: string;
+  trackingId?: string;
+  [key: string]: unknown;
+};
+
 /**
  * Describes the minimal contract for a MCP transport that a client or server can communicate over.
  */
@@ -46,4 +53,10 @@ export interface Transport {
    * The session ID generated for this connection.
    */
   sessionId?: string;
+  
+  /**
+   * Authentication information for this connection.
+   * This is populated by server-side middleware on requests.
+   */
+  authInfo?: AuthInfo;
 }

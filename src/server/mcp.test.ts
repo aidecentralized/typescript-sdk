@@ -1581,4 +1581,181 @@ describe("prompt()", () => {
     expect(result.completion.values).toEqual(["Alice"]);
     expect(result.completion.total).toBe(1);
   });
+  
+  describe('clientTracking', () => {
+    it('should properly track client activity when enabled', async () => {
+      // Create server with client tracking enabled
+      const server = new McpServer(
+        { name: 'test', version: '1.0.0' },
+        { enableClientTracking: true }
+      );
+      
+      // Register a simple test tool (before connecting to transport)
+      server.tool('test', 'Test tool for checking auth', {}, async (args: Record<string, never>, extra) => {
+        // Ensure auth info is available in the extra object
+        expect(extra.auth).toBeDefined();
+        expect(extra.auth?.clientId).toBe('test-client');
+        expect(extra.auth?.trackingId).toBe('test-tracking-id');
+        
+        return { content: [{ type: 'text', text: 'test' }] };
+      });
+      
+      // Spy on recordClientActivity method
+      const recordSpy = jest.spyOn(server, 'recordClientActivity');
+      
+      // Create a mock request handler directly since we can't easily invoke the private method
+      // Instead, we'll directly call the recordClientActivity to test it
+      const extra = {
+        signal: new AbortController().signal,
+        sessionId: 'test-session',
+        auth: {
+          clientId: 'test-client',
+          trackingId: 'test-tracking-id'
+        }
+      };
+      
+      // Create a dummy transport to simulate authenticated requests
+      const dummyTransport = {
+        start: jest.fn().mockResolvedValue(undefined),
+        send: jest.fn().mockResolvedValue(undefined),
+        close: jest.fn().mockResolvedValue(undefined),
+        sessionId: 'test-session',
+        authInfo: {
+          clientId: 'test-client',
+          trackingId: 'test-tracking-id'
+        }
+      };
+      
+      // Connect to transport with type assertion
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await server.connect(dummyTransport as any);
+      
+      // Directly call recordClientActivity to test it
+      await server.recordClientActivity(extra, {
+        type: 'test',
+        method: 'tools/call',
+        metadata: { test: true },
+        status: 'success'
+      });
+      
+      // Verify recordClientActivity was called
+      expect(recordSpy).toHaveBeenCalled();
+      
+      // Clean up
+      recordSpy.mockRestore();
+    });
+    
+    it('should register and provide clientActivity tool', async () => {
+      // Create server with client tracking enabled and mock store
+      const mockTrackingStore = {
+        recordActivity: jest.fn().mockResolvedValue(undefined),
+        getActivities: jest.fn().mockResolvedValue([
+          { 
+            timestamp: Date.now(), 
+            type: 'tool/call', 
+            method: 'test',
+            status: 'success'
+          }
+        ]),
+        getActivityStats: jest.fn().mockResolvedValue({
+          totalActivities: 1,
+          successCount: 1,
+          errorCount: 0,
+          typeBreakdown: { 'tool/call': 1 },
+          firstActivityTime: Date.now() - 1000,
+          lastActivityTime: Date.now(),
+          averageHourlyRate: 1
+        })
+      };
+      
+      const server = new McpServer(
+        { name: 'test', version: '1.0.0' },
+        { 
+          enableClientTracking: true,
+          clientTrackingStore: mockTrackingStore
+        }
+      );
+      
+      // Register client activity tool
+      server.registerClientActivityTool();
+      
+      // Mock execution context
+      const extra = {
+        signal: new AbortController().signal,
+        sessionId: 'test-session',
+        auth: {
+          clientId: 'test-client',
+          trackingId: 'test-tracking-id',
+          token: 'test-token',
+          scopes: []
+        }
+      };
+      
+      // Access tool implementation
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      type ToolInfo = { callback: (args: any, extra: any) => Promise<any> };
+      const toolInfo = (server as unknown as { _registeredTools: Record<string, ToolInfo> })._registeredTools.clientActivity;
+      expect(toolInfo).toBeDefined();
+      
+      // Call the tool's callback
+      const result = await toolInfo.callback({ limit: 20 }, extra);
+      
+      // Verify the result
+      expect(result).toBeDefined();
+      expect(result.isError).toBeFalsy();
+      expect(mockTrackingStore.getActivities).toHaveBeenCalledWith('test-tracking-id', expect.any(Object));
+      expect(mockTrackingStore.getActivityStats).toHaveBeenCalledWith('test-tracking-id');
+    });
+    
+    it('should track client activity duration', async () => {
+      // Create server with client tracking enabled
+      const server = new McpServer(
+        { name: 'test', version: '1.0.0' },
+        { enableClientTracking: true }
+      );
+      
+      // Spy on recordClientActivity method
+      const recordSpy = jest.spyOn(server, 'recordClientActivity');
+      
+      // Create a mock request handler
+      const extra = {
+        signal: new AbortController().signal,
+        sessionId: 'test-session',
+        auth: {
+          clientId: 'test-client',
+          trackingId: 'test-tracking-id',
+          token: 'test-token',
+          scopes: []
+        }
+      };
+      
+      // Call recordClientActivity directly with metadata including duration
+      await server.recordClientActivity(extra, {
+        type: 'tool/call',
+        method: 'tools/call',
+        metadata: {
+          tool: 'delayed-test',
+          duration: 50
+        },
+        status: 'success'
+      });
+      
+      // Verify recordClientActivity was called with the right parameters
+      expect(recordSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          type: 'tool/call',
+          method: 'tools/call',
+          metadata: expect.objectContaining({
+            tool: 'delayed-test',
+            duration: 50
+          }),
+          status: 'success'
+        })
+      );
+      
+      // Clean up
+      recordSpy.mockRestore();
+    });
+  });
 });

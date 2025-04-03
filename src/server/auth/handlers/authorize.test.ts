@@ -41,6 +41,9 @@ describe('Authorization Handler', () => {
   // Mock provider
   const mockProvider: OAuthServerProvider = {
     clientsStore: mockClientStore,
+    // Add client tracking properties
+    trackingStore: undefined,
+    clientTrackingEnabled: false,
 
     async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
       // Mock implementation - redirects to redirectUri with code and state
