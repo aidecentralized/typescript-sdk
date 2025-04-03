@@ -28,6 +28,9 @@ describe('Revocation Handler', () => {
   // Mock provider with revocation capability
   const mockProviderWithRevocation: OAuthServerProvider = {
     clientsStore: mockClientStore,
+    // Add client tracking properties
+    trackingStore: undefined,
+    clientTrackingEnabled: false,
 
     async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
       res.redirect('https://example.com/callback?code=mock_auth_code');
@@ -75,6 +78,9 @@ describe('Revocation Handler', () => {
   // Mock provider without revocation capability
   const mockProviderWithoutRevocation: OAuthServerProvider = {
     clientsStore: mockClientStore,
+    // Add client tracking properties
+    trackingStore: undefined,
+    clientTrackingEnabled: false,
 
     async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
       res.redirect('https://example.com/callback?code=mock_auth_code');

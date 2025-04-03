@@ -4,6 +4,7 @@ import { Transport } from "../shared/transport.js";
 import { JSONRPCMessage, JSONRPCMessageSchema } from "../types.js";
 import getRawBody from "raw-body";
 import contentType from "content-type";
+import { AuthInfo } from "./auth/types.js";
 
 const MAXIMUM_MESSAGE_SIZE = "4mb";
 
@@ -15,6 +16,7 @@ const MAXIMUM_MESSAGE_SIZE = "4mb";
 export class SSEServerTransport implements Transport {
   private _sseResponse?: ServerResponse;
   private _sessionId: string;
+  private _authInfo?: AuthInfo;
 
   onclose?: () => void;
   onerror?: (error: Error) => void;
@@ -26,8 +28,10 @@ export class SSEServerTransport implements Transport {
   constructor(
     private _endpoint: string,
     private res: ServerResponse,
+    authInfo?: AuthInfo
   ) {
     this._sessionId = randomUUID();
+    this._authInfo = authInfo;
   }
 
   /**
@@ -64,12 +68,22 @@ export class SSEServerTransport implements Transport {
    * Handles incoming POST messages.
    *
    * This should be called when a POST request is made to send a message to the server.
+   * 
+   * @param req The incoming request
+   * @param res The server response
+   * @param parsedBody Optional pre-parsed body
+   * @param authInfo Optional authentication information from middleware
    */
   async handlePostMessage(
     req: IncomingMessage,
     res: ServerResponse,
     parsedBody?: unknown,
+    authInfo?: AuthInfo,
   ): Promise<void> {
+    // Update auth info if provided (allows middleware to update auth during the session)
+    if (authInfo) {
+      this._authInfo = authInfo;
+    }
     if (!this._sseResponse) {
       const message = "SSE connection not established";
       res.writeHead(500).end(message);
@@ -141,5 +155,12 @@ export class SSEServerTransport implements Transport {
    */
   get sessionId(): string {
     return this._sessionId;
+  }
+
+  /**
+   * Returns the authentication information for this transport session.
+   */
+  get authInfo(): AuthInfo | undefined {
+    return this._authInfo;
   }
 }

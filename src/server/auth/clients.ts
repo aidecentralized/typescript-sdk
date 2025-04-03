@@ -1,4 +1,6 @@
 import { OAuthClientInformationFull } from "../../shared/auth.js";
+import { ClientActivity, ClientTrackingStore, ActivityStats, ActivityQueryOptions } from "./types.js";
+import crypto from "crypto";
 
 /**
  * Stores information about registered OAuth clients for this server.
@@ -17,4 +19,175 @@ export interface OAuthRegisteredClientsStore {
    * If unimplemented, dynamic client registration is unsupported.
    */
   registerClient?(client: OAuthClientInformationFull): OAuthClientInformationFull | Promise<OAuthClientInformationFull>;
+}
+
+/**
+ * Generates a tracking ID for a client based on its characteristics.
+ * This creates a stable identifier across multiple sessions that doesn't
+ * directly expose personally identifiable information.
+ * 
+ * @param clientInfo Information about the client to generate a tracking ID for
+ * @param seed An optional seed to use for generating the tracking ID
+ * @returns A unique tracking ID that persists across client sessions
+ */
+export function generateClientTrackingId(
+  clientInfo: OAuthClientInformationFull,
+  seed?: string
+): string {
+  // Create a hash of client characteristics that will remain stable
+  // but is pseudonymous (not directly traceable to the user)
+  const hash = crypto.createHash('sha256');
+  
+  // Use client_id as base
+  hash.update(clientInfo.client_id);
+  
+  // Add stable characteristics if available
+  if (clientInfo.software_id) {
+    hash.update(clientInfo.software_id);
+  }
+  
+  if (clientInfo.software_version) {
+    hash.update(clientInfo.software_version);
+  }
+
+  if (clientInfo.client_name) {
+    hash.update(clientInfo.client_name);
+  }
+  
+  // Add any redirect URIs (these are usually stable for a client)
+  if (clientInfo.redirect_uris && clientInfo.redirect_uris.length > 0) {
+    clientInfo.redirect_uris.sort().forEach(uri => hash.update(uri));
+  }
+  
+  // Add optional seed for additional entropy
+  if (seed) {
+    hash.update(seed);
+  }
+  
+  // Return a shortened hash (first 16 chars of hex is still 64 bits, sufficiently unique)
+  return hash.digest('hex').substring(0, 16);
+}
+
+/**
+ * In-memory implementation of ClientTrackingStore
+ * This is a simple reference implementation that stores activities in memory.
+ * Production implementations would typically use a database or other persistent store.
+ */
+export class InMemoryClientTrackingStore implements ClientTrackingStore {
+  private activities: Map<string, ClientActivity[]> = new Map();
+
+  /**
+   * Records a client activity in the store
+   */
+  async recordActivity(
+    clientId: string,
+    trackingId: string,
+    activity: ClientActivity
+  ): Promise<void> {
+    if (!this.activities.has(trackingId)) {
+      this.activities.set(trackingId, []);
+    }
+    
+    this.activities.get(trackingId)!.push({
+      ...activity,
+      // Ensure timestamp exists
+      timestamp: activity.timestamp || Date.now()
+    });
+  }
+
+  /**
+   * Gets activities for a client by tracking ID
+   */
+  async getActivities(
+    trackingId: string, 
+    options?: ActivityQueryOptions
+  ): Promise<ClientActivity[]> {
+    const activities = this.activities.get(trackingId) || [];
+    
+    if (!options) {
+      return [...activities]; // Return a copy of the activities
+    }
+    
+    let filtered = activities;
+    
+    // Apply time filtering
+    if (options.startTime !== undefined) {
+      filtered = filtered.filter(a => a.timestamp >= options.startTime!);
+    }
+    
+    if (options.endTime !== undefined) {
+      filtered = filtered.filter(a => a.timestamp <= options.endTime!);
+    }
+    
+    // Apply type filtering
+    if (options.types && options.types.length > 0) {
+      filtered = filtered.filter(a => options.types!.includes(a.type));
+    }
+    
+    // Apply sorting
+    filtered = [...filtered].sort((a, b) => {
+      return options.sort === 'asc' 
+        ? a.timestamp - b.timestamp 
+        : b.timestamp - a.timestamp;
+    });
+    
+    // Apply limit
+    if (options.limit !== undefined && options.limit > 0) {
+      filtered = filtered.slice(0, options.limit);
+    }
+    
+    return filtered;
+  }
+
+  /**
+   * Gets activity statistics for a client
+   */
+  async getActivityStats(trackingId: string): Promise<ActivityStats> {
+    const activities = this.activities.get(trackingId) || [];
+    
+    if (activities.length === 0) {
+      return {
+        totalActivities: 0,
+        successCount: 0,
+        errorCount: 0,
+        typeBreakdown: {},
+        firstActivityTime: 0,
+        lastActivityTime: 0,
+        averageHourlyRate: 0
+      };
+    }
+    
+    // Calculate success and error counts
+    const successCount = activities.filter(a => a.status === 'success').length;
+    const errorCount = activities.filter(a => a.status === 'error').length;
+    
+    // Calculate type breakdown
+    const typeBreakdown: Record<string, number> = {};
+    for (const activity of activities) {
+      if (!typeBreakdown[activity.type]) {
+        typeBreakdown[activity.type] = 0;
+      }
+      typeBreakdown[activity.type]++;
+    }
+    
+    // Calculate timestamps
+    const timestamps = activities.map(a => a.timestamp);
+    const firstActivityTime = Math.min(...timestamps);
+    const lastActivityTime = Math.max(...timestamps);
+    
+    // Calculate hourly rate (over the last 24 hours)
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const recentActivities = activities.filter(a => a.timestamp >= oneDayAgo);
+    const averageHourlyRate = recentActivities.length / 24;
+    
+    return {
+      totalActivities: activities.length,
+      successCount,
+      errorCount,
+      typeBreakdown,
+      firstActivityTime,
+      lastActivityTime,
+      averageHourlyRate
+    };
+  }
 }
