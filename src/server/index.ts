@@ -28,6 +28,9 @@ import {
   ServerResult,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "../types.js";
+import { Coupon, DistinguishedName, Certificate } from "../types/coupon.js";
+import { couponStorage } from "../coupon/storage/index.js";
+import { extractAndVerifyCoupon, issueCouponForRequest } from "../coupon/server.js";
 
 export type ServerOptions = ProtocolOptions & {
   /**
@@ -39,6 +42,13 @@ export type ServerOptions = ProtocolOptions & {
    * Optional instructions describing how to use the server and its features.
    */
   instructions?: string;
+  
+  /**
+   * Whether this server supports coupons.
+   * When enabled, the server will extract, verify, and store coupons from requests,
+   * and provide endpoints for accessing and managing coupons.
+   */
+  enableCoupons?: boolean;
 };
 
 /**
@@ -79,11 +89,20 @@ export class Server<
   private _clientVersion?: Implementation;
   private _capabilities: ServerCapabilities;
   private _instructions?: string;
+  private _enableCoupons: boolean;
+  private _serverDN?: DistinguishedName;
+  private _serverCertificate?: Certificate;
+  private _serverPrivateKey?: string;
 
   /**
    * Callback for when initialization has fully completed (i.e., the client has sent an `initialized` notification).
    */
   oninitialized?: () => void;
+  
+  /**
+   * Callback for when a coupon is extracted and verified from a request.
+   */
+  oncoupon?: (coupon: Coupon) => void;
 
   /**
    * Initializes this server with the given name and version information.
@@ -95,6 +114,7 @@ export class Server<
     super(options);
     this._capabilities = options?.capabilities ?? {};
     this._instructions = options?.instructions;
+    this._enableCoupons = options?.enableCoupons ?? false;
 
     this.setRequestHandler(InitializeRequestSchema, (request) =>
       this._oninitialize(request),
@@ -102,6 +122,30 @@ export class Server<
     this.setNotificationHandler(InitializedNotificationSchema, () =>
       this.oninitialized?.(),
     );
+    
+    // If coupons are enabled, we would ideally intercept all requests to extract and verify coupons
+    // However, interceptRequest is not currently available in the Protocol class
+    if (this._enableCoupons) {
+      /*
+      this.interceptRequest(async (request) => {
+        try {
+          const coupon = await extractAndVerifyCoupon(request);
+          if (coupon) {
+            // Store the coupon and notify via the callback
+            await couponStorage.storeCoupon(coupon);
+            this.oncoupon?.(coupon);
+          }
+        } catch (error) {
+          // Log the error but continue processing the request
+          console.error("Error processing coupon:", error);
+        }
+        
+        // Always continue with the request
+        return request;
+      });
+      */
+      console.warn('Automatic coupon extraction requires Protocol.interceptRequest method which is not implemented');
+    }
   }
 
   /**
@@ -328,5 +372,77 @@ export class Server<
 
   async sendPromptListChanged() {
     return this.notification({ method: "notifications/prompts/list_changed" });
+  }
+  
+  /**
+   * Configure the server's identity for coupon issuance.
+   * This must be called before issuing coupons.
+   * 
+   * @param serverDN - The server's distinguished name
+   * @param certificate - The server's certificate
+   * @param privateKey - The server's private key for signing coupons
+   */
+  configureCouponIdentity(
+    serverDN: DistinguishedName,
+    certificate: Certificate,
+    privateKey: string
+  ): void {
+    this._serverDN = serverDN;
+    this._serverCertificate = certificate;
+    this._serverPrivateKey = privateKey;
+  }
+  
+  /**
+   * Issue a coupon for a client.
+   * Server identity must be configured first using configureCouponIdentity().
+   * 
+   * @param clientDN - The client's distinguished name
+   * @param requestData - Optional data about the request to include
+   * @param expiryDays - Optional number of days until expiry
+   * @returns The issued coupon
+   */
+  async issueCoupon(
+    clientDN: DistinguishedName,
+    requestData: Record<string, any> = {},
+    expiryDays: number = 30
+  ): Promise<Coupon> {
+    if (!this._enableCoupons) {
+      throw new Error("Coupons are not enabled for this server");
+    }
+    
+    if (!this._serverDN || !this._serverCertificate || !this._serverPrivateKey) {
+      throw new Error("Server identity not configured for coupon issuance");
+    }
+    
+    return issueCouponForRequest(
+      clientDN,
+      this._serverDN,
+      this._serverCertificate,
+      this._serverPrivateKey,
+      requestData,
+      expiryDays
+    );
+  }
+  
+  /**
+   * Get all stored coupons.
+   * 
+   * @returns An array of all coupons
+   */
+  async getAllCoupons(): Promise<Coupon[]> {
+    if (!this._enableCoupons) {
+      throw new Error("Coupons are not enabled for this server");
+    }
+    
+    return couponStorage.getAllCoupons();
+  }
+  
+  /**
+   * Check if coupons are enabled for this server.
+   * 
+   * @returns True if coupons are enabled
+   */
+  areCouponsEnabled(): boolean {
+    return this._enableCoupons;
   }
 }
