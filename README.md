@@ -601,6 +601,8 @@ This setup allows you to:
 - [Model Context Protocol documentation](https://modelcontextprotocol.io)
 - [MCP Specification](https://spec.modelcontextprotocol.io)
 - [Example Servers](https://github.com/modelcontextprotocol/servers)
+- [SDK Documentation](./docs)
+  - [Coupon System Documentation](./docs/coupon/index.md) - Cryptographically secure system for establishing trust between clients and servers
 
 ## Contributing
 

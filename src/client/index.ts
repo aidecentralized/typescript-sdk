@@ -40,12 +40,38 @@ import {
   SUPPORTED_PROTOCOL_VERSIONS,
   UnsubscribeRequest,
 } from "../types.js";
+import { Coupon, DistinguishedName, Certificate } from "../types/coupon.js";
+import { createRequestWithCoupon, createRequestWithNewCoupon } from "../coupon/client.js";
 
 export type ClientOptions = ProtocolOptions & {
   /**
    * Capabilities to advertise as being supported by this client.
    */
   capabilities?: ClientCapabilities;
+  
+  /**
+   * Whether this client should support coupons.
+   * When enabled, the client will be able to create and attach coupons to requests.
+   */
+  enableCoupons?: boolean;
+  
+  /**
+   * The client's distinguished name to use for coupon creation.
+   * Required if enableCoupons is true.
+   */
+  clientDN?: DistinguishedName;
+  
+  /**
+   * The client's certificate to use for coupon creation.
+   * Required if enableCoupons is true.
+   */
+  clientCertificate?: Certificate;
+  
+  /**
+   * The client's private key to use for signing coupons.
+   * Required if enableCoupons is true.
+   */
+  clientPrivateKey?: string;
 };
 
 /**
@@ -86,6 +112,11 @@ export class Client<
   private _serverVersion?: Implementation;
   private _capabilities: ClientCapabilities;
   private _instructions?: string;
+  private _enableCoupons: boolean;
+  private _clientDN?: DistinguishedName;
+  private _clientCertificate?: Certificate;
+  private _clientPrivateKey?: string;
+  private _defaultCoupon?: Coupon;
 
   /**
    * Initializes this client with the given name and version information.
@@ -96,6 +127,19 @@ export class Client<
   ) {
     super(options);
     this._capabilities = options?.capabilities ?? {};
+    this._enableCoupons = options?.enableCoupons ?? false;
+    
+    // If coupons are enabled, store the client identity
+    if (this._enableCoupons) {
+      // Validate that all required coupon parameters are provided
+      if (!options?.clientDN || !options?.clientCertificate || !options?.clientPrivateKey) {
+        throw new Error('Client identity (DN, certificate, and private key) must be provided when coupons are enabled');
+      }
+      
+      this._clientDN = options.clientDN;
+      this._clientCertificate = options.clientCertificate;
+      this._clientPrivateKey = options.clientPrivateKey;
+    }
   }
 
   /**
@@ -429,5 +473,151 @@ export class Client<
 
   async sendRootsListChanged() {
     return this.notification({ method: "notifications/roots/list_changed" });
+  }
+  
+  /**
+   * Sets a default coupon to use for all requests.
+   * 
+   * @param coupon - The coupon to use as default
+   */
+  setDefaultCoupon(coupon: Coupon): void {
+    if (!this._enableCoupons) {
+      throw new Error("Coupons are not enabled for this client");
+    }
+    
+    this._defaultCoupon = coupon;
+  }
+  
+  /**
+   * Creates a new coupon for use with requests.
+   * 
+   * @param serverDN - The server's distinguished name (recipient)
+   * @param data - Optional additional data for the coupon
+   * @returns A new coupon
+   */
+  createCoupon(
+    serverDN: DistinguishedName,
+    data: Record<string, any> = {}
+  ): Coupon {
+    if (!this._enableCoupons) {
+      throw new Error("Coupons are not enabled for this client");
+    }
+    
+    if (!this._clientDN || !this._clientCertificate || !this._clientPrivateKey) {
+      throw new Error("Client identity not configured for coupon creation");
+    }
+    
+    const request = createRequestWithNewCoupon(
+      "coupon-creation", // Method name doesn't matter here
+      {}, // Empty params
+      this._clientDN,
+      serverDN,
+      this._clientCertificate,
+      this._clientPrivateKey,
+      data
+    );
+    
+    // Extract the coupon from the created request
+    return request.params._meta.coupon;
+  }
+  
+  /**
+   * Creates and sets a new default coupon.
+   * 
+   * @param serverDN - The server's distinguished name
+   * @param data - Optional additional data for the coupon
+   * @returns The created coupon
+   */
+  createAndSetDefaultCoupon(
+    serverDN: DistinguishedName,
+    data: Record<string, any> = {}
+  ): Coupon {
+    const coupon = this.createCoupon(serverDN, data);
+    this.setDefaultCoupon(coupon);
+    return coupon;
+  }
+  
+  /**
+   * Attaches a coupon to a request and returns the updated request.
+   * 
+   * @param request - The request to attach the coupon to
+   * @param coupon - The coupon to attach, or undefined to use the default coupon
+   * @returns The request with the coupon attached
+   */
+  attachCouponToRequest<T extends Request>(
+    request: T,
+    coupon?: Coupon
+  ): T {
+    if (!this._enableCoupons) {
+      throw new Error("Coupons are not enabled for this client");
+    }
+    
+    const couponToUse = coupon || this._defaultCoupon;
+    
+    if (!couponToUse) {
+      throw new Error("No coupon provided and no default coupon set");
+    }
+    
+    // Use the client utility function but preserve the original request type
+    const withCoupon = createRequestWithCoupon(
+      request.method,
+      request.params || {},
+      couponToUse
+    );
+    
+    return {
+      ...request,
+      params: withCoupon.params
+    } as T;
+  }
+  
+  /**
+   * Intercept all outgoing requests to attach the default coupon if one is set.
+   * This should be called before connecting to a transport.
+   */
+  enableAutomaticCouponAttachment(): void {
+    if (!this._enableCoupons) {
+      throw new Error("Coupons are not enabled for this client");
+    }
+    
+    if (this.transport) {
+      throw new Error("Cannot enable automatic coupon attachment after connecting to transport");
+    }
+    
+    // Note: This functionality would require an interceptRequest method which
+    // doesn't currently exist in the Protocol class. This would need to be
+    // added to the Protocol class before enabling this feature.
+    /* 
+    this.interceptRequest((request) => {
+      // Only attach the default coupon if one is set and no coupon is already attached
+      if (this._defaultCoupon && 
+          (!request.params?._meta?.coupon || 
+           !request.params?.coupon)) {
+        return this.attachCouponToRequest(request);
+      }
+      
+      return request;
+    });
+    */
+    
+    console.warn('Automatic coupon attachment requires Protocol.interceptRequest method which is not implemented');
+  }
+  
+  /**
+   * Check if coupons are enabled for this client.
+   * 
+   * @returns True if coupons are enabled
+   */
+  areCouponsEnabled(): boolean {
+    return this._enableCoupons;
+  }
+  
+  /**
+   * Gets the default coupon if one is set.
+   * 
+   * @returns The default coupon or undefined if none is set
+   */
+  getDefaultCoupon(): Coupon | undefined {
+    return this._defaultCoupon;
   }
 }

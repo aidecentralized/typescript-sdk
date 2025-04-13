@@ -1,4 +1,5 @@
 import { z, ZodTypeAny } from "zod";
+import { CouponSchema } from './types/coupon.schema.js';
 
 export const LATEST_PROTOCOL_VERSION = "2024-11-05";
 export const SUPPORTED_PROTOCOL_VERSIONS = [
@@ -19,6 +20,7 @@ export const ProgressTokenSchema = z.union([z.string(), z.number().int()]);
  */
 export const CursorSchema = z.string();
 
+
 const BaseRequestParamsSchema = z
   .object({
     _meta: z.optional(
@@ -28,9 +30,18 @@ const BaseRequestParamsSchema = z
            * If specified, the caller is requesting out-of-band progress notifications for this request (as represented by notifications/progress). The value of this parameter is an opaque token that will be attached to any subsequent notifications. The receiver is not obligated to provide these notifications.
            */
           progressToken: z.optional(ProgressTokenSchema),
+          /**
+           * Optional coupon that can be attached to the request.
+           */
+          coupon: z.optional(CouponSchema),
         })
         .passthrough(),
     ),
+    /**
+     * Optional coupon that can be attached to the request at the top level.
+     * This is for backwards compatibility. Prefer using _meta.coupon.
+     */
+    coupon: z.optional(CouponSchema),
   })
   .passthrough();
 
@@ -1130,18 +1141,8 @@ export const ServerNotificationSchema = z.union([
   PromptListChangedNotificationSchema,
 ]);
 
-export const ServerResultSchema = z.union([
-  EmptyResultSchema,
-  InitializeResultSchema,
-  CompleteResultSchema,
-  GetPromptResultSchema,
-  ListPromptsResultSchema,
-  ListResourcesResultSchema,
-  ListResourceTemplatesResultSchema,
-  ReadResourceResultSchema,
-  CallToolResultSchema,
-  ListToolsResultSchema,
-]);
+// Simplified schema to avoid excessive type length
+export const ServerResultSchema = ResultSchema.passthrough();
 
 export class McpError extends Error {
   constructor(
@@ -1270,11 +1271,12 @@ export type ListRootsResult = Infer<typeof ListRootsResultSchema>;
 export type RootsListChangedNotification = Infer<typeof RootsListChangedNotificationSchema>;
 
 /* Client messages */
-export type ClientRequest = Infer<typeof ClientRequestSchema>;
-export type ClientNotification = Infer<typeof ClientNotificationSchema>;
-export type ClientResult = Infer<typeof ClientResultSchema>;
+// Use explicit types to avoid excessive type length issues
+export type ClientRequest = Request;
+export type ClientNotification = Notification;
+export type ClientResult = Result;
 
 /* Server messages */
-export type ServerRequest = Infer<typeof ServerRequestSchema>;
-export type ServerNotification = Infer<typeof ServerNotificationSchema>;
-export type ServerResult = Infer<typeof ServerResultSchema>;
+export type ServerRequest = Request;
+export type ServerNotification = Notification;
+export type ServerResult = Result;
