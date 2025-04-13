@@ -42,6 +42,12 @@ import { Completable, CompletableDef } from "./completable.js";
 import { UriTemplate, Variables } from "../shared/uriTemplate.js";
 import { RequestHandlerExtra } from "../shared/protocol.js";
 import { Transport } from "../shared/transport.js";
+import {
+  RegistryClient,
+  ServerCapabilityRequest,
+  ServerRegistrationRequest,
+  ServerRegistrationResponse,
+} from "../shared/registry.js";
 
 /**
  * High-level MCP server that provides a simpler API for working with resources, tools, and prompts.
@@ -53,6 +59,11 @@ export class McpServer {
    * The underlying Server instance, useful for advanced operations like sending notifications.
    */
   public readonly server: Server;
+
+  /**
+   * The registry client for server registration and discovery
+   */
+  private registry: RegistryClient;
 
   protected _registeredResources: { [uri: string]: RegisteredResource } = {};
   protected _registeredResourceTemplates: {
@@ -68,6 +79,7 @@ export class McpServer {
 
   constructor(serverInfo: Implementation, options?: ServerOptions) {
     this.server = new Server(serverInfo, options);
+    this.registry = new RegistryClient(serverInfo, options?.registry);
   }
 
   /**
@@ -77,6 +89,229 @@ export class McpServer {
    */
   async connect(transport: Transport): Promise<void> {
     return await this.server.connect(transport);
+  }
+
+  /**
+   * Registers the server with the Nanda registry.
+   *
+   * @param requestData Additional registration parameters to override defaults
+   * @returns The registration response with server ID and metadata
+   */
+  async register(
+    requestData?: Partial<ServerRegistrationRequest>,
+  ): Promise<ServerRegistrationResponse> {
+    // Convert registered tools and resources to capabilities array for registration
+    const capabilities = this.getCapabilitiesForRegistration();
+
+    // Generate protocols based on registered tools and resources
+    const protocols = this.getProtocolsForRegistration();
+
+    // Derive types based on registered items
+    const types = this.getTypesForRegistration();
+
+    // Merge generated metadata with any provided parameters
+    const registrationData: Partial<ServerRegistrationRequest> = {
+      capabilities,
+      protocols,
+      types,
+      ...requestData,
+    };
+
+    return await this.registry.registerServer(registrationData);
+  }
+
+  /**
+   * Gets the current registration status
+   */
+  getRegistrationStatus() {
+    return this.registry.getRegistrationStatus();
+  }
+
+  /**
+   * Convert registered tools to capabilities format for registration
+   */
+  // private getCapabilitiesForRegistration() {
+  //   const capabilities = [];
+
+  //   // Convert registered tools
+  //   for (const [name, tool] of Object.entries(this._registeredTools)) {
+  //     const capability = {
+  //       name,
+  //       description: tool.description || `${name} tool`,
+  //       type: "tool" as const,
+  //       parameters: tool.inputSchema
+  //         ? this.convertSchemaToParameters(tool.inputSchema)
+  //         : undefined,
+  //       examples: [],
+  //     };
+
+  //     capabilities.push(capability);
+  //   }
+
+  //   // Convert registered resource templates
+  //   for (const [name, template] of Object.entries(
+  //     this._registeredResourceTemplates,
+  //   )) {
+  //     capabilities.push({
+  //       name,
+  //       description: template.metadata?.description || `${name} resource`,
+  //       type: "resource" as const,
+  //       parameters: [],
+  //       examples: [],
+  //     });
+  //   }
+
+  //   // Convert registered prompts
+  //   for (const [name, prompt] of Object.entries(this._registeredPrompts)) {
+  //     capabilities.push({
+  //       name,
+  //       description: prompt.description || `${name} prompt`,
+  //       type: "agent" as const,
+  //       parameters: prompt.argsSchema
+  //         ? this.convertSchemaToParameters(prompt.argsSchema)
+  //         : undefined,
+  //       examples: [],
+  //     });
+  //   }
+
+  //   return capabilities;
+  // }
+
+  private getCapabilitiesForRegistration() {
+    const capabilities: ServerCapabilityRequest[] = [];
+
+    // Convert registered tools
+    for (const [name, tool] of Object.entries(this._registeredTools)) {
+      const capability: ServerCapabilityRequest = {
+        name,
+        description: tool.description || `${name} tool`, // Ensure description is a string
+        type: "tool",
+        parameters: tool.inputSchema
+          ? this.convertSchemaToParameters(tool.inputSchema)
+          : undefined,
+        examples: [],
+      };
+
+      capabilities.push(capability);
+    }
+
+    // Convert registered resource templates
+    for (const [name, template] of Object.entries(
+      this._registeredResourceTemplates,
+    )) {
+      capabilities.push({
+        name,
+        description:
+          (template.metadata?.description as string) || `${name} resource`, // Ensure description is a string
+        type: "resource",
+        parameters: [],
+        examples: [],
+      });
+    }
+
+    // Convert registered prompts
+    for (const [name, prompt] of Object.entries(this._registeredPrompts)) {
+      capabilities.push({
+        name,
+        description: prompt.description || `${name} prompt`, // Ensure description is a string
+        type: "agent",
+        parameters: prompt.argsSchema
+          ? this.convertSchemaToParameters(prompt.argsSchema)
+          : undefined,
+        examples: [],
+      });
+    }
+
+    return capabilities;
+  }
+
+  /**
+   * Convert Zod schema to parameters format for registration
+   */
+  private convertSchemaToParameters(schema: ZodObject<ZodRawShape>) {
+    const parameters = [];
+
+    for (const [name, field] of Object.entries(schema.shape)) {
+      const parameter = {
+        name,
+        description: field.description || name,
+        type: this.getParameterType(field),
+        required: !field.isOptional(),
+      };
+
+      parameters.push(parameter);
+    }
+
+    return parameters;
+  }
+
+  /**
+   * Get parameter type from Zod schema field
+   */
+  private getParameterType(field: ZodTypeAny): string {
+    if (field instanceof z.ZodString) return "string";
+    if (field instanceof z.ZodNumber) return "number";
+    if (field instanceof z.ZodBoolean) return "boolean";
+    if (field instanceof z.ZodArray) return "array";
+    if (field instanceof z.ZodObject) return "object";
+    if (field instanceof z.ZodEnum) return "string";
+    if (field instanceof z.ZodUnion) return "union";
+    if (field instanceof Completable)
+      return this.getParameterType(field.unwrap());
+    if (field instanceof z.ZodOptional) {
+      return this.getParameterType(field.unwrap());
+    }
+
+    return "unknown";
+  }
+
+  /**
+   * Get protocols based on registered capabilities
+   */
+  private getProtocolsForRegistration(): string[] {
+    const protocols = ["mcp"];
+
+    // If we have tools, add tool protocol
+    if (Object.keys(this._registeredTools).length > 0) {
+      protocols.push("tool");
+    }
+
+    // If we have resources, add resource protocol
+    if (
+      Object.keys(this._registeredResources).length > 0 ||
+      Object.keys(this._registeredResourceTemplates).length > 0
+    ) {
+      protocols.push("resource");
+    }
+
+    return protocols;
+  }
+
+  /**
+   * Get types based on registered capabilities
+   */
+  private getTypesForRegistration(): Array<"agent" | "resource" | "tool"> {
+    const types: Array<"agent" | "resource" | "tool"> = [];
+
+    // If we have tools, add tool type
+    if (Object.keys(this._registeredTools).length > 0) {
+      types.push("tool");
+    }
+
+    // If we have resources, add resource type
+    if (
+      Object.keys(this._registeredResources).length > 0 ||
+      Object.keys(this._registeredResourceTemplates).length > 0
+    ) {
+      types.push("resource");
+    }
+
+    // If we have prompts, add agent type
+    if (Object.keys(this._registeredPrompts).length > 0) {
+      types.push("agent");
+    }
+
+    return types;
   }
 
   /**

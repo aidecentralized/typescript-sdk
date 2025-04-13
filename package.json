@@ -1,15 +1,15 @@
 {
-  "name": "@modelcontextprotocol/sdk",
+  "name": "@aidecentralized/sdk",
   "version": "1.8.0",
   "description": "Model Context Protocol implementation for TypeScript",
   "license": "MIT",
-  "author": "Anthropic, PBC (https://anthropic.com)",
-  "homepage": "https://modelcontextprotocol.io",
-  "bugs": "https://github.com/modelcontextprotocol/typescript-sdk/issues",
+  "author": "Originally by Anthropic, PBC (https://anthropic.com), Extended by MIT",
+  "homepage": "https://aidecentralized.github.io",
+  "bugs": "https://github.com/aidecentralized/typescript-sdk/issues",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/modelcontextprotocol/typescript-sdk.git"
+    "url": "git+https://github.com/aidecentralized/typescript-sdk.git"
   },
   "engines": {
     "node": ">=18"

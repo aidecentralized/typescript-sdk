@@ -1,3 +1,4 @@
+import { RegistryOptions } from "../shared/registry.js";
 import {
   mergeCapabilities,
   Protocol,
@@ -39,6 +40,11 @@ export type ServerOptions = ProtocolOptions & {
    * Optional instructions describing how to use the server and its features.
    */
   instructions?: string;
+
+  /**
+   * Options for the registry integration
+   */
+  registry?: RegistryOptions;
 };
 
 /**
@@ -88,10 +94,7 @@ export class Server<
   /**
    * Initializes this server with the given name and version information.
    */
-  constructor(
-    private _serverInfo: Implementation,
-    options?: ServerOptions,
-  ) {
+  constructor(private _serverInfo: Implementation, options?: ServerOptions) {
     super(options);
     this._capabilities = options?.capabilities ?? {};
     this._instructions = options?.instructions;
