@@ -16,6 +16,9 @@ export * from './create.js';
 // Export signing utilities
 export * from './sign.js';
 
+// Export verification utilities
+export * from './verify.js';
+
 // Export client utilities
 export * from './client.js';
 

@@ -263,3 +263,109 @@ export interface CouponFilter {
    */
   id?: string;
 }
+
+/**
+ * Result of a verification check
+ */
+export interface VerificationCheck {
+  /**
+   * Whether the check passed
+   */
+  passed: boolean;
+  
+  /**
+   * Error message if the check failed
+   */
+  error?: string;
+}
+
+/**
+ * Result of comprehensive coupon verification
+ */
+export interface CouponVerificationResult {
+  /**
+   * Coupon ID
+   */
+  id: string;
+  
+  /**
+   * Issuer common name
+   */
+  issuer: string;
+  
+  /**
+   * Recipient common name
+   */
+  recipient: string;
+  
+  /**
+   * Issuance date
+   */
+  issuedAt: string;
+  
+  /**
+   * Overall verification result
+   */
+  verified: boolean;
+  
+  /**
+   * Individual verification checks
+   */
+  checks: {
+    /**
+     * Format validation check
+     */
+    format?: VerificationCheck;
+    
+    /**
+     * Expiry check
+     */
+    expiry?: VerificationCheck;
+    
+    /**
+     * Trusted issuer check
+     */
+    trustedIssuer?: VerificationCheck;
+    
+    /**
+     * Cryptographic signature verification
+     */
+    signature?: VerificationCheck;
+    
+    /**
+     * Additional custom checks
+     */
+    [key: string]: VerificationCheck | undefined;
+  };
+}
+
+/**
+ * Options for coupon verification
+ */
+export interface CouponVerifyOptions {
+  /**
+   * Whether to check if the coupon is expired
+   */
+  checkExpiry?: boolean;
+  
+  /**
+   * Whether to verify the coupon's signature
+   */
+  verifySignature?: boolean;
+  
+  /**
+   * Whether to validate the coupon's format
+   */
+  validateFormat?: boolean;
+  
+  /**
+   * Whether to check if the issuer is trusted
+   */
+  checkTrustedIssuer?: boolean;
+  
+  /**
+   * Set of trusted issuer common names
+   * Only used if checkTrustedIssuer is true
+   */
+  trustedIssuers?: Set<string>;
+}
