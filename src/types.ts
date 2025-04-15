@@ -1077,7 +1077,23 @@ export const RootsListChangedNotificationSchema = NotificationSchema.extend({
 });
 
 /* Client messages */
-export const ClientRequestSchema = z.union([
+export const ClientRequestSchema: z.ZodUnion<
+  [
+    typeof PingRequestSchema,
+    typeof InitializeRequestSchema,
+    typeof CompleteRequestSchema,
+    typeof SetLevelRequestSchema,
+    typeof GetPromptRequestSchema,
+    typeof ListPromptsRequestSchema,
+    typeof ListResourcesRequestSchema,
+    typeof ListResourceTemplatesRequestSchema,
+    typeof ReadResourceRequestSchema,
+    typeof SubscribeRequestSchema,
+    typeof UnsubscribeRequestSchema,
+    typeof CallToolRequestSchema,
+    typeof ListToolsRequestSchema
+  ]
+> = z.union([
   PingRequestSchema,
   InitializeRequestSchema,
   CompleteRequestSchema,

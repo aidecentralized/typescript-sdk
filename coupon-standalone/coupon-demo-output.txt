@@ -1,0 +1,111 @@
+🚀 Starting MCP Coupon Demo
+==============================
+
+📜 Generating server identity...
+Server identity created: MCP Server (MCP Demo Organization)
+
+📜 Generating client identity...
+Client identity created: MCP Client (MCP Client Organization)
+
+🎫 Creating server-issued coupon for client...
+Server issued coupon with ID: a036161d-ec19-48e8-aad5-c15985e9e07d
+Expiry: 2025-05-15T01:47:05.628Z
+Coupon stored in storage
+
+🎫 Creating client-issued coupon for server...
+Client issued coupon with ID: 87c6bc2c-5ef5-49f4-8fcb-53c79e1a3590
+
+✅ Verifying coupons...
+Server-issued coupon validation: VALID
+Client-issued coupon validation: VALID
+
+🔒 Creating a request with a coupon attached...
+Request created with coupon attached
+{
+  "method": "tools/call",
+  "params": {
+    "name": "exampleTool",
+    "params": {
+      "value": 42
+    },
+    "_meta": {
+      "coupon": {
+        "id": "87c6bc2c-5ef5-49f4-8fcb-53c79e1a3590",
+        "issuer": {
+          "commonName": "MCP Client",
+          "organization": "MCP Client Organization",
+          "country": "US"
+        },
+        "recipient": {
+          "commonName": "MCP Server",
+          "organization": "MCP Demo Organization",
+          "country": "US"
+        },
+        "issuedAt": "2025-04-15T01:47:05.631Z",
+        "issuerCertificate": {
+          "serialNumber": "978883",
+          "issuer": {
+            "commonName": "MCP Client",
+            "organization": "MCP Client Organization",
+            "country": "US"
+          },
+          "subject": {
+            "commonName": "MCP Client",
+            "organization": "MCP Client Organization",
+            "country": "US"
+          },
+          "issuedAt": "2025-04-15T01:47:05.627Z",
+          "expiresAt": "2026-04-15T01:47:05.627Z",
+          "subjectPublicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwv+HYMoBFbrB19WvvQd/\nq0FJ9YeN7xRYgiXQRfVlg9Pir2TpfveE8TRUrLsMLkWWnYNEVQ0sekB03pCXjm50\n/lhmU6XuD9UQVyUZxs6Dt8QCvo1lcS5ZY2VfDge46sQdP5cgDVsRB7Jy1l8ctHOU\nss2wWWa1BC8itNLYO10e1Kd/DCr8w2vpnN8cVJeqacVSj0+5qAXhOq4+/auveVvg\nIRpD4ZzNz3TX92rd1FL/yud7wD7BOqBK7U/UVhU3A+3rC5WLxmRpcNWhrLJW3Ffb\nkXe66SP4PSWW5VOs+PPA5W44DwqbpCaH6KqP4rOlRGxvdrk3bOeI7oFMZVZhDOtJ\noQIDAQAB\n-----END PUBLIC KEY-----\n",
+          "publicKeyAlgorithm": "RSA",
+          "keyUsage": [
+            "digitalSignature",
+            "keyEncipherment"
+          ],
+          "signature": "demo-signature",
+          "signatureAlgorithm": "SHA256withRSA",
+          "version": "3"
+        },
+        "protocolVersion": "2023-04-01",
+        "data": {
+          "purpose": "client-issued-demo",
+          "timestamp": "2025-04-15T01:47:05.631Z"
+        },
+        "expiresAt": "2025-05-15T01:47:05.631Z",
+        "signature": "dJHVXjT/D+gRRIeWL4XOiZhmk2c8S9mGGj2qg9yMf+I1fI2ZoTRfu0JRvdodaqRSAwMj9HmlhepuM7RzrPGoTCkh3kBO5AoHyCNONEFiYVdLZCbKB5vYnP6/k2AYio2ROrTboG/XLMJKcnywCoFzKrQDKibbo+OyoEPKo4hQUBpiZFUtmrHrloNokKbpyuLNmtIjknTW8uyOOi0WesPhq97yNEVOIPEvlekJvM8ag+g+BYSaYfwJP7WXgfcxlx95qBNnqcNvB6+Z7E+ji4BbOUaDwK7ZS63jtBt6bIgTAgoQOsyXS1ibUd+1i2Ve5nEwchBW13XUyzktvOs+Bx+1jQ==",
+        "signatureAlgorithm": "SHA256withRSA",
+        "canonicalizationMethod": "JSON-canonicalize + SHA256"
+      }
+    }
+  }
+}
+
+🔍 Extracting and verifying coupon from request...
+✓ Coupon extracted and verified successfully
+Coupon ID: 87c6bc2c-5ef5-49f4-8fcb-53c79e1a3590
+From: MCP Client
+To: MCP Server
+Purpose: client-issued-demo
+Extracted coupon stored in storage
+
+📋 Listing all stored coupons:
+Found 2 coupons in storage:
+
+Coupon ID: a036161d-ec19-48e8-aad5-c15985e9e07d
+Issuer: MCP Server (MCP Demo Organization)
+Recipient: MCP Client (MCP Client Organization)
+Issued at: 4/14/2025, 9:47:05 PM
+Expires at: 5/14/2025, 9:47:05 PM
+Purpose: server-issued-demo
+
+Coupon ID: 87c6bc2c-5ef5-49f4-8fcb-53c79e1a3590
+Issuer: MCP Client (MCP Client Organization)
+Recipient: MCP Server (MCP Demo Organization)
+Issued at: 4/14/2025, 9:47:05 PM
+Expires at: 5/14/2025, 9:47:05 PM
+Purpose: client-issued-demo
+
+🔎 Filtering coupons by issuer:
+Found 1 coupons issued by MCP Client
+
+✨ Demo completed successfully
