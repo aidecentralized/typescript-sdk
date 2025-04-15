@@ -1,6 +1,6 @@
 /**
  * Coupon Server Example
- * Demonstrates working with manual coupon processing.
+ * Demonstrates working with maSo whatnual coupon processing.
  * Handles coupon verification and storage in a typical server environment.
  */
 import express from 'express';

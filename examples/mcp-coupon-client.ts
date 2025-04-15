@@ -15,7 +15,7 @@ import readline from 'readline';
 import { Coupon, Certificate, DistinguishedName, CertificateGenerationOptions } from '../src/types/coupon.js';
 
 // Import coupon creation utilities
-import { generateCertificate } from '../src/coupon/sign.js';
+import { generateCertificate } from './shared/certificate-utils.js';
 import { createCoupon } from '../src/coupon/create.js';
 
 // Get __dirname equivalent in ES modules

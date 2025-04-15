@@ -4,7 +4,7 @@
  * Provides verification services and reputation metrics through REST API and WebSocket.
  */
 import { McpServer } from '../src/server/mcp.js';
-import { WebSocketTransport } from '../src/shared/transport.js';
+import { WebSocketTransport } from './shared/websocket-transport.js';
 import { WebSocketServer } from 'ws';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { z } from 'zod';

@@ -4,7 +4,7 @@
  * Provides tools for certificate generation, coupon creation and communication with other servers.
  */
 import { McpServer } from '../src/server/mcp.js';
-import { WebSocketTransport } from '../src/shared/transport.js';
+import { WebSocketTransport } from './shared/websocket-transport.js';
 import { WebSocketServer } from 'ws';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { z } from 'zod';
@@ -16,7 +16,7 @@ import { Client } from '../src/client/index.js';
 import WebSocket from 'ws';
 
 // Import coupon-related utilities
-import { generateCertificate } from '../src/coupon/sign.js';
+import { generateCertificate } from './shared/certificate-utils.js';
 import { createCoupon } from '../src/coupon/create.js';
 import { Certificate, Coupon } from '../src/types/coupon.js';
 

@@ -106,3 +106,6 @@ If you have issues:
 2. Check that the URLs in config.json match your server addresses
 3. Verify your firewall allows connections to ports 3001, 3002, and 3003
 4. Check the server consoles for connection attempts
+5. If you see errors about missing WebSocketTransport or generateCertificate:
+   - Ensure you have the custom implementations in examples/shared directory
+   - Run the servers using the startup.sh script which properly compiles dependencies

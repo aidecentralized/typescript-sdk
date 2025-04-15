@@ -64,7 +64,7 @@ chmod +x examples/startup.sh
 
 This script will:
 1. Install dependencies if needed
-2. Compile TypeScript files if they exist
+2. Use the pre-compiled JavaScript files or compile TypeScript files if needed
 3. Start all three servers in separate terminals or background processes
 
 ### Option 2: Manual Startup
@@ -82,13 +82,14 @@ node examples/main-mcp-server.js
 node examples/reputation-mcp-server.js
 ```
 
-If using TypeScript files, compile them first:
+### Important Note About Custom Implementations
 
-```bash
-npx tsc examples/client-mcp-server.ts --esModuleInterop --resolveJsonModule --target es2020 --module esnext --moduleResolution node
-npx tsc examples/main-mcp-server.ts --esModuleInterop --resolveJsonModule --target es2020 --module esnext --moduleResolution node
-npx tsc examples/reputation-mcp-server.ts --esModuleInterop --resolveJsonModule --target es2020 --module esnext --moduleResolution node
-```
+The examples use custom implementations in the `examples/shared` directory:
+
+- `websocket-transport.js/ts`: Server-side WebSocket transport implementation
+- `certificate-utils.js/ts`: Certificate generation utilities
+
+These are required because the SDK currently does not provide these implementations directly.
 
 ### Using with Claude Desktop
 

@@ -5,7 +5,7 @@
  */
 import { McpServer } from '../src/server/mcp.js';
 import { Server } from '../src/server/index.js';
-import { WebSocketTransport } from '../src/shared/transport.js';
+import { WebSocketTransport } from './shared/websocket-transport.js';
 import { WebSocketServer } from 'ws';
 import { z } from 'zod';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
