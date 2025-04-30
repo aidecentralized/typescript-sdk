@@ -1,0 +1,59 @@
+🚀 Starting MCP Coupon Demo
+==============================
+
+[1] Creating and starting MCP server...
+📡 Generating server identity...
+Server identity created: MCP Server (MCP Demo Organization)
+MCP server with coupons listening on port 3000
+Health check: http://localhost:3000/health
+Coupons endpoint: http://localhost:3000/coupons
+
+[2] Creating MCP client...
+💻 Generating client identity...
+Client identity created: MCP Client (MCP Client Organization)
+Fetching server identity...
+Connected to server: MCP Server
+
+[3] Requesting a coupon from the server...
+Server issued coupon to MCP Client: beb4d085-b7e9-45a9-82a5-df6596b78b5b
+Received server-issued coupon: beb4d085-b7e9-45a9-82a5-df6596b78b5b
+Received coupon with ID: beb4d085-b7e9-45a9-82a5-df6596b78b5b
+
+[4] Creating a client-issued coupon...
+Created client-issued coupon: c239a124-ba66-455e-b52f-235a97e5d54f
+Created coupon with ID: c239a124-ba66-455e-b52f-235a97e5d54f
+
+[5] Validating client-issued coupon with server...
+Server validated coupon: c239a124-ba66-455e-b52f-235a97e5d54f from MCP Client
+Validation result:
+{
+  "success": true,
+  "message": "Coupon validated successfully",
+  "couponId": "c239a124-ba66-455e-b52f-235a97e5d54f",
+  "issuer": "MCP Client",
+  "recipient": "MCP Server",
+  "data": {
+    "purpose": "client-issued-demo",
+    "timestamp": "2025-04-15T01:54:35.284Z"
+  }
+}
+
+[6] Listing all coupons in storage...
+Found 2 coupons:
+
+- ID: beb4d085-b7e9-45a9-82a5-df6596b78b5b
+  Issuer: MCP Server (MCP Demo Organization)
+  Recipient: MCP Client (MCP Client Organization)
+  Issued at: 4/14/2025, 9:54:35 PM
+  Expires at: 5/14/2025, 9:54:35 PM
+  Purpose: server-issued-demo
+
+- ID: c239a124-ba66-455e-b52f-235a97e5d54f
+  Issuer: MCP Client (MCP Client Organization)
+  Recipient: MCP Server (MCP Demo Organization)
+  Issued at: 4/14/2025, 9:54:35 PM
+  Expires at: 5/14/2025, 9:54:35 PM
+  Purpose: client-issued-demo
+
+✨ Demo completed successfully
+Server stopped

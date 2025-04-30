@@ -150,6 +150,8 @@ export abstract class Protocol<
   SendNotificationT extends Notification,
   SendResultT extends Result,
 > {
+  // Array of request interceptors
+  private _requestInterceptors: Array<(request: SendRequestT) => SendRequestT | Promise<SendRequestT>> = [];
   private _transport?: Transport;
   private _requestMessageId = 0;
   private _requestHandlers: Map<
@@ -673,6 +675,25 @@ export abstract class Protocol<
    */
   removeNotificationHandler(method: string): void {
     this._notificationHandlers.delete(method);
+  }
+  
+  /**
+   * Register a function to intercept and potentially modify outgoing requests.
+   * Multiple interceptors can be registered and will be called in registration order.
+   * 
+   * @param interceptor - A function that takes a request and returns a potentially modified request
+   * @returns A function that removes the interceptor when called
+   */
+  interceptRequest(interceptor: (request: SendRequestT) => SendRequestT | Promise<SendRequestT>): () => void {
+    this._requestInterceptors.push(interceptor);
+    
+    // Return a function to remove this interceptor
+    return () => {
+      const index = this._requestInterceptors.indexOf(interceptor);
+      if (index !== -1) {
+        this._requestInterceptors.splice(index, 1);
+      }
+    };
   }
 }
 
